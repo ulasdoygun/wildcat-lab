@@ -1,76 +1,126 @@
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, KeepTogether
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 import io
 
 BLUE  = colors.HexColor("#1a3a5c")
 BLUE2 = colors.HexColor("#2563a8")
-LBLUE = colors.HexColor("#dbeafe")
 LGRAY = colors.HexColor("#f1f5f9")
 LGRAY2= colors.HexColor("#e2e8f0")
 WHITE = colors.white
-YELLOW= colors.HexColor("#fef9c3")
 
 UNITS = {
-    "dtex": "dtex", "total_dtex": "dtex",
-    "boiling_shrinkage": "%", "thickness": "µm",
-    "tensile": "N", "yarn_wrap": "wraps/m",
-    "air_shrinkage": "%", "width": "mm", "elongation": "%",
+    "dtex":"dtex","total_dtex":"dtex","boiling_shrinkage":"%",
+    "thickness":"µm","tensile":"N","yarn_wrap":"wraps/m",
+    "air_shrinkage":"%","width":"mm","elongation":"%",
 }
+TESTS = [
+    ("dtex","DTEX"),("total_dtex","TOTAL DTEX"),
+    ("boiling_shrinkage","BOILING SHRINKAGE"),
+    ("thickness","THICKNESS"),("tensile","TENSILE (AVE)"),
+    ("yarn_wrap","YARN WRAP/M"),
+    ("air_shrinkage","AIR SHRINKAGE"),
+    ("width","WIDTH"),("elongation","ELONGATION"),
+]
 
 def P(text, size=8, bold=False, color=colors.black, align=TA_LEFT):
-    style = ParagraphStyle('x', fontSize=size,
-                           fontName='Helvetica-Bold' if bold else 'Helvetica',
-                           textColor=color, alignment=align,
-                           leading=size*1.3)
-    return Paragraph(str(text) if text is not None else "-", style)
+    s = ParagraphStyle('x', fontSize=size,
+                       fontName='Helvetica-Bold' if bold else 'Helvetica',
+                       textColor=color, alignment=align,
+                       leading=max(size+2, 10), wordWrap='CJK')
+    return Paragraph(str(text) if text is not None else "-", s)
 
 def fmt(val):
     if val is None: return "-"
     try:
         f = float(val)
+        if f == 0: return "-"
         return f"{f:.1f}" if f != int(f) else str(int(f))
-    except: return str(val)
+    except: return str(val) if val else "-"
+
+def make_pos_table(pos, pd, colors_list):
+    nc = len(colors_list)
+    # Column widths: label=38mm, unit=9mm, each color=min(18,170/(nc) mm
+    avail = 170
+    lw = 38; uw = 9
+    cvw = min(20, int((avail - lw - uw) / max(nc,1)))
+    col_w = [lw*mm, uw*mm] + [cvw*mm]*nc
+
+    # Header row
+    hdr = [P(f"Pos: {pos}", 8, True, WHITE, TA_CENTER),
+           P("Unit", 7, False, WHITE, TA_CENTER)]
+    for c in colors_list:
+        hdr.append(P(c, 7, True, WHITE, TA_CENTER))
+
+    rows = [hdr]
+    for key, label in TESTS:
+        unit = UNITS.get(key,"")
+        row  = [P(label, 7, True), P(unit, 7, False, colors.HexColor("#0369a1"))]
+        if key in ("total_dtex","yarn_wrap"):
+            val = pd.get(key)
+            row.append(P(fmt(val), 8))
+            row += [P("-")]*( nc-1)
+        else:
+            d = pd.get(key, {})
+            for c in colors_list:
+                v = d.get(c) if isinstance(d,dict) else None
+                row.append(P(fmt(v), 8))
+        rows.append(row)
+
+    style = [
+        ('BACKGROUND',(0,0),(-1,0),BLUE2),
+        ('TEXTCOLOR',(0,0),(-1,0),WHITE),
+        ('GRID',(0,0),(-1,-1),0.4,LGRAY2),
+        ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+        ('TOPPADDING',(0,0),(-1,-1),2),
+        ('BOTTOMPADDING',(0,0),(-1,-1),2),
+        ('FONTSIZE',(0,0),(-1,-1),7),
+        ('ROWBACKGROUNDS',(0,1),(-1,-1),[WHITE,LGRAY]),
+    ]
+    t = Table(rows, colWidths=col_w, splitByRow=1)
+    t.setStyle(TableStyle(style))
+    return t
 
 def generate_pdf(record):
-    buffer  = io.BytesIO()
-    doc     = SimpleDocTemplate(buffer, pagesize=A4,
-                                rightMargin=10*mm, leftMargin=10*mm,
-                                topMargin=10*mm, bottomMargin=10*mm)
-    story   = []
-    colors_list = record.get("colors", [])
-    positions   = record.get("positions", [])
-    test_data   = record.get("test_data", {})
-    nc          = len(colors_list)
+    buffer = io.BytesIO()
+    doc    = SimpleDocTemplate(buffer, pagesize=A4,
+                               rightMargin=10*mm, leftMargin=10*mm,
+                               topMargin=10*mm, bottomMargin=10*mm)
+    story  = []
+    colors_list = record.get("colors",[])
+    positions   = record.get("positions",[])
+    test_data   = record.get("test_data",{})
 
     # ── Header ────────────────────────────────────────────────────────────────
-    hdr = Table([[P("WILDCAT ENTERPRISE TEXTILES INDUSTRIES", 12, True, WHITE, TA_CENTER)]],
-                colWidths=[190*mm])
-    hdr.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),BLUE),
-                              ('TOPPADDING',(0,0),(-1,-1),7),('BOTTOMPADDING',(0,0),(-1,-1),7)]))
-    story.append(hdr)
-
-    sub = Table([[P("WC-F-QC-05  Mono Yarn Full Inspection Form  |  Rev.00  |  Date: 02-Jan-2025",
-                    8, False, WHITE, TA_CENTER)]], colWidths=[190*mm])
-    sub.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),BLUE2),
-                              ('TOPPADDING',(0,0),(-1,-1),4),('BOTTOMPADDING',(0,0),(-1,-1),4)]))
-    story.append(sub)
+    for text, bg, fsize in [
+        ("WILDCAT ENTERPRISE TEXTILES INDUSTRIES", BLUE, 11),
+        ("WC-F-QC-05  Mono Yarn Full Inspection Form  |  Rev.00  |  02-Jan-2025", BLUE2, 8),
+    ]:
+        t = Table([[P(text, fsize, fsize>9, WHITE, TA_CENTER)]], colWidths=[190*mm])
+        t.setStyle(TableStyle([
+            ('BACKGROUND',(0,0),(-1,-1),bg),
+            ('TOPPADDING',(0,0),(-1,-1),6),('BOTTOMPADDING',(0,0),(-1,-1),6),
+        ]))
+        story.append(t)
     story.append(Spacer(1,3*mm))
 
-    # ── Info row ──────────────────────────────────────────────────────────────
-    info_data = [[
-        P("LINE",7,True), P(record.get("line",""),8),
-        P("SHIFT",7,True), P(record.get("shift",""),8),
-        P("DATE",7,True), P(record.get("date",""),8),
-        P("TIME",7,True), P(record.get("time",""),8),
-        P("WO",7,True), P(record.get("wo",""),8),
-        P("ITEM",7,True), P(record.get("item",""),8),
-        P("OPERATOR",7,True), P(record.get("operator",""),8),
-    ]]
-    info_tbl = Table(info_data, colWidths=[x*mm for x in [12,18,12,12,12,22,10,14,14,22,10,18,16,28]])
+    # ── Info ──────────────────────────────────────────────────────────────────
+    fields = [
+        ("LINE",record.get("line","")),("SHIFT",record.get("shift","")),
+        ("DATE",record.get("date","")),("TIME",record.get("time","")),
+        ("WO",record.get("wo","")),("ITEM",record.get("item","")),
+        ("OPERATOR",record.get("operator","")),
+    ]
+    info_row  = []
+    info_cw   = []
+    for lbl, val in fields:
+        info_row += [P(lbl,6,True), P(str(val),7)]
+        info_cw  += [12*mm, 15*mm]
+    # trim to 190mm
+    info_tbl = Table([info_row], colWidths=info_cw)
     info_tbl.setStyle(TableStyle([
         ('BACKGROUND',(0,0),(0,0),LGRAY),('BACKGROUND',(2,0),(2,0),LGRAY),
         ('BACKGROUND',(4,0),(4,0),LGRAY),('BACKGROUND',(6,0),(6,0),LGRAY),
@@ -81,166 +131,76 @@ def generate_pdf(record):
         ('TOPPADDING',(0,0),(-1,-1),3),('BOTTOMPADDING',(0,0),(-1,-1),3),
     ]))
     story.append(info_tbl)
-    story.append(Spacer(1,4*mm))
+    story.append(Spacer(1,3*mm))
 
-    # ── Test rows — 2 positions side by side ─────────────────────────────────
-    TESTS = [
-        ("dtex",             "DTEX"),
-        ("total_dtex",       "TOTAL DTEX"),
-        ("boiling_shrinkage","BOILING SHRINKAGE (AVE)"),
-        ("thickness",        "THICKNESS"),
-        ("tensile",          "TENSILE (AVE)"),
-        ("yarn_wrap",        "YARN WRAP PER METER"),
-        ("air_shrinkage",    "AIR SHRINKAGE"),
-        ("width",            "WIDTH"),
-        ("elongation",       "ELONGATION (AVE)"),
-    ]
+    # ── Positions — 2 per row ─────────────────────────────────────────────────
+    pairs = [(positions[i], positions[i+1] if i+1<len(positions) else None)
+             for i in range(0,len(positions),2)]
 
-    # Column widths for one position block
-    # test_label | unit | color1 | color2 | ... (max 4 colors)
-    # Portrait A4 usable = 190mm
-    # 2 blocks side by side: each block = lw + uw + nc*cvw, plus sep
-    # Max nc=4: each block = 28+8+4*12=72mm, 2 blocks+sep = 72+4+72 = 148mm < 190 OK
-    lw  = 28*mm
-    uw  = 8*mm
-    cvw = 12*mm
-    sep = 4*mm
-
-    one_block_w = lw + uw + nc*cvw
-    total_w     = 190*mm
-    # We can fit 2 positions side by side
-    pairs = [(positions[i], positions[i+1] if i+1 < len(positions) else None)
-             for i in range(0, len(positions), 2)]
-
-    for pos_left, pos_right in pairs:
-        # Header for this pair
-        def make_pos_header(pos):
-            if pos is None: return []
-            row = [P(f"Pos: {pos}", 8, True, WHITE, TA_CENTER)]
-            row += [P("Unit", 7, False, WHITE, TA_CENTER)]
-            for c in colors_list:
-                row.append(P(c, 7, True, WHITE, TA_CENTER))
-            return row
-
-        header_left  = make_pos_header(pos_left)
-        header_right = make_pos_header(pos_right) if pos_right else []
-
-        if header_right:
-            combined_header = header_left + [P("")] + header_right
+    for pos_l, pos_r in pairs:
+        tbl_l = make_pos_table(pos_l, test_data.get(pos_l,{}), colors_list)
+        if pos_r:
+            tbl_r = make_pos_table(pos_r, test_data.get(pos_r,{}), colors_list)
+            combined = Table([[tbl_l, Spacer(4*mm,1), tbl_r]],
+                              colWidths=[91*mm, 4*mm, 91*mm],
+                              splitByRow=0)
+            combined.setStyle(TableStyle([
+                ('VALIGN',(0,0),(-1,-1),'TOP'),
+                ('TOPPADDING',(0,0),(-1,-1),0),
+                ('BOTTOMPADDING',(0,0),(-1,-1),0),
+                ('LEFTPADDING',(0,0),(-1,-1),0),
+                ('RIGHTPADDING',(0,0),(-1,-1),0),
+            ]))
+            story.append(KeepTogether(combined))
         else:
-            combined_header = header_left
-
-        col_widths = [lw, uw] + [cvw]*nc
-        if pos_right:
-            col_widths += [sep] + [lw, uw] + [cvw]*nc
-
-        rows = [combined_header]
-
-        pd_l = test_data.get(pos_left, {})
-        pd_r = test_data.get(pos_right, {}) if pos_right else {}
-
-        for key, label in TESTS:
-            unit = UNITS.get(key,"")
-            # left side
-            row = [P(label, 7, True), P(unit, 7, False, colors.HexColor("#0369a1"))]
-            if key in ("total_dtex", "yarn_wrap"):
-                val = pd_l.get(key)
-                row.append(P(fmt(val), 8))
-                row += [P("")] * (nc-1)
-            else:
-                d = pd_l.get(key, {})
-                for c in colors_list:
-                    row.append(P(fmt(d.get(c) if isinstance(d,dict) else None), 8))
-            # right side
-            if pos_right:
-                row.append(P(""))  # separator
-                row.append(P(label, 7, True))
-                row.append(P(unit, 7, False, colors.HexColor("#0369a1")))
-                if key in ("total_dtex", "yarn_wrap"):
-                    val = pd_r.get(key)
-                    row.append(P(fmt(val), 8))
-                    row += [P("")] * (nc-1)
-                else:
-                    d = pd_r.get(key, {})
-                    for c in colors_list:
-                        row.append(P(fmt(d.get(c) if isinstance(d,dict) else None), 8))
-            rows.append(row)
-
-        tbl = Table(rows, colWidths=col_widths)
-        style = [
-            ('BACKGROUND',(0,0),(1+nc,0),BLUE2),
-            ('TEXTCOLOR',(0,0),(1+nc,0),WHITE),
-            ('GRID',(0,0),(1+nc,-1),0.4,LGRAY2),
-            ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
-            ('TOPPADDING',(0,0),(-1,-1),2),('BOTTOMPADDING',(0,0),(-1,-1),2),
-            ('FONTSIZE',(0,0),(-1,-1),8),
-        ]
-        if pos_right:
-            right_start = 2+nc+1  # after separator
-            style += [
-                ('BACKGROUND',(right_start,0),(-1,0),BLUE2),
-                ('TEXTCOLOR',(right_start,0),(-1,0),WHITE),
-                ('GRID',(right_start,0),(-1,-1),0.4,LGRAY2),
-                ('BACKGROUND',(2+nc,0),(2+nc,-1),colors.white),  # separator col
-                ('GRID',(2+nc,0),(2+nc,-1),0,colors.white),
-            ]
-            # Alternate row shading
-            for ri in range(1, len(rows)):
-                if ri % 2 == 0:
-                    style.append(('BACKGROUND',(0,ri),(1+nc,ri),LGRAY))
-                    style.append(('BACKGROUND',(right_start,ri),(-1,ri),LGRAY))
-        else:
-            for ri in range(1, len(rows)):
-                if ri % 2 == 0:
-                    style.append(('BACKGROUND',(0,ri),(1+nc,ri),LGRAY))
-
-        tbl.setStyle(TableStyle(style))
-        story.append(tbl)
+            story.append(KeepTogether(tbl_l))
         story.append(Spacer(1,3*mm))
 
     # ── SCI/SCE ───────────────────────────────────────────────────────────────
-    sci   = record.get("sci", {})
-    spool = record.get("spool_no", "")
-    if sci:
-        sci_row  = [P(f"SCI/SCE  (Spool: {spool})", 7, True)] 
-        sci_vals = [P(f"{c}: {sci.get(c,'-')}", 8) for c in colors_list]
-        sci_data_tbl = Table([sci_row + sci_vals],
-                              colWidths=[50*mm] + [35*mm]*nc)
-        sci_data_tbl.setStyle(TableStyle([
+    sci   = record.get("sci",{})
+    spool = record.get("spool_no","")
+    if any(sci.values()):
+        row = [P(f"SCI/SCE (Spool: {spool})",7,True)]
+        cw  = [45*mm]
+        for c in colors_list:
+            row.append(P(f"{c}: {sci.get(c,'-')}",7))
+            cw.append(35*mm)
+        t = Table([row], colWidths=cw)
+        t.setStyle(TableStyle([
             ('BACKGROUND',(0,0),(0,0),LGRAY),
             ('GRID',(0,0),(-1,-1),0.4,LGRAY2),
             ('TOPPADDING',(0,0),(-1,-1),3),('BOTTOMPADDING',(0,0),(-1,-1),3),
         ]))
-        story.append(sci_data_tbl)
+        story.append(t)
         story.append(Spacer(1,3*mm))
 
     # ── Comments ──────────────────────────────────────────────────────────────
     comments = record.get("comments","")
     if comments:
-        cmt = Table([[P("Comments:", 7, True), P(comments, 8)]],
-                     colWidths=[25*mm, 165*mm])
-        cmt.setStyle(TableStyle([
+        t = Table([[P("Comments:",7,True), P(comments,7)]],
+                   colWidths=[22*mm,168*mm])
+        t.setStyle(TableStyle([
             ('BACKGROUND',(0,0),(0,0),LGRAY),
             ('GRID',(0,0),(-1,-1),0.4,LGRAY2),
             ('VALIGN',(0,0),(-1,-1),'TOP'),
             ('TOPPADDING',(0,0),(-1,-1),4),('BOTTOMPADDING',(0,0),(-1,-1),4),
         ]))
-        story.append(cmt)
+        story.append(t)
         story.append(Spacer(1,3*mm))
 
     # ── Tolerance / Verified ──────────────────────────────────────────────────
-    tol = Table([[
-        P("TOLERANCE VALUE CHECK", 7, True),
-        P("All tests conducted per standard procedure. Results verified for accuracy and compliance.", 7),
-        P(f"Verified by: {record.get('verified_by','')}", 8, True),
-    ]], colWidths=[40*mm, 110*mm, 40*mm])
-    tol.setStyle(TableStyle([
+    t = Table([[
+        P("TOLERANCE VALUE CHECK",7,True),
+        P("All tests conducted per standard procedure. Verified for accuracy and compliance.",7),
+        P(f"Verified by:\n{record.get('verified_by','')}",7,True),
+    ]], colWidths=[40*mm,110*mm,40*mm])
+    t.setStyle(TableStyle([
         ('BACKGROUND',(0,0),(0,0),LGRAY),('BACKGROUND',(2,0),(2,0),LGRAY),
         ('GRID',(0,0),(-1,-1),0.4,LGRAY2),
         ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
         ('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5),
     ]))
-    story.append(tol)
+    story.append(t)
 
     doc.build(story)
     buffer.seek(0)
