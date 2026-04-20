@@ -84,14 +84,13 @@ def get_records_for_line_date(line, wo_number, date_str):
 
 # ── Media helpers ─────────────────────────────────────────────────────────────
 def save_media_file(record_id, file_type, uploaded_file, wo_number):
-    """Save uploaded file, return filename."""
-    ext = Path(uploaded_file.name).suffix
-    ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
-    fname = f"{wo_number}_{file_type}_{ts}{ext}"
+    ext   = Path(uploaded_file.name).suffix
+    ts    = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Format: TYPE_WORKORDER_datetime.ext  e.g. protocol_2607019_20260420_143022.jpg
+    fname = f"{file_type}_{wo_number}_{ts}{ext}"
     fpath = os.path.join(MEDIA_DIR, record_id)
     os.makedirs(fpath, exist_ok=True)
-    full = os.path.join(fpath, fname)
-    with open(full, "wb") as f: f.write(uploaded_file.getbuffer())
+    with open(os.path.join(fpath, fname), "wb") as f: f.write(uploaded_file.getbuffer())
     return fname
 
 def get_media_files(record_id):
@@ -102,54 +101,57 @@ def get_media_files(record_id):
 def get_media_path(record_id, fname):
     return os.path.join(MEDIA_DIR, record_id, fname)
 
-# ── Concurrent edit lock ──────────────────────────────────────────────────────
-LOCK_FILE = "/root/lab/edit_locks.json"
+# ── Presence helpers ──────────────────────────────────────────────────────────
+PRESENCE_FILE   = "/root/lab/presence.json"
+PRESENCE_EXPIRE = 120  # seconds
 
-def load_locks():
-    if os.path.exists(LOCK_FILE):
-        with open(LOCK_FILE) as f: return json.load(f)
+def load_presence():
+    if os.path.exists(PRESENCE_FILE):
+        with open(PRESENCE_FILE) as f: return json.load(f)
     return {}
 
-def save_locks(locks):
-    with open(LOCK_FILE, "w") as f: json.dump(locks, f)
+def save_presence_data(p):
+    with open(PRESENCE_FILE, "w") as f: json.dump(p, f)
 
-def acquire_lock(record_id, user):
-    locks = load_locks()
-    now   = datetime.now().isoformat()
-    existing = locks.get(record_id)
-    if existing and existing["user"] != user:
-        # Check if lock is stale (>5 min)
-        try:
-            locked_at = datetime.fromisoformat(existing["locked_at"])
-            if (datetime.now() - locked_at).seconds < 300:
-                return False, existing["user"], existing["locked_at"]
-        except: pass
-    locks[record_id] = {"user": user, "locked_at": now}
-    save_locks(locks)
-    return True, user, now
+def set_presence(record_id, user):
+    if not record_id or not user: return
+    p = load_presence()
+    p[record_id] = {"user": user, "since": datetime.now().isoformat()}
+    save_presence_data(p)
 
-def release_lock(record_id, user):
-    locks = load_locks()
-    if locks.get(record_id, {}).get("user") == user:
-        del locks[record_id]
-        save_locks(locks)
+def clear_presence(record_id, user):
+    if not record_id: return
+    p = load_presence()
+    if p.get(record_id, {}).get("user") == user:
+        del p[record_id]; save_presence_data(p)
 
-def check_lock(record_id):
-    locks = load_locks()
-    existing = locks.get(record_id)
-    if not existing: return None
+def get_presence(record_id):
+    if not record_id: return None
+    p = load_presence()
+    entry = p.get(record_id)
+    if not entry: return None
     try:
-        locked_at = datetime.fromisoformat(existing["locked_at"])
-        if (datetime.now() - locked_at).seconds < 300:
-            return existing
+        since = datetime.fromisoformat(entry["since"])
+        if (datetime.now() - since).seconds < PRESENCE_EXPIRE:
+            return entry
     except: pass
     return None
+
+def get_all_presence():
+    p = load_presence(); result = {}; now = datetime.now()
+    for rid, entry in p.items():
+        try:
+            since = datetime.fromisoformat(entry["since"])
+            if (now - since).seconds < PRESENCE_EXPIRE:
+                result[rid] = entry
+        except: pass
+    return result
 
 # ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 .wc-header {
-    background: linear-gradient(90deg,#1a3a5c,#2563a8);
+    background:linear-gradient(90deg,#1a3a5c,#2563a8);
     color:white; padding:16px 24px; border-radius:10px;
     display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;
 }
@@ -179,9 +181,10 @@ st.markdown("""
     background:#fff7ed; border:1px solid #fed7aa; border-radius:8px;
     padding:10px 16px; margin-bottom:12px; color:#9a3412; font-weight:600;
 }
-.lock-warning {
-    background:#fef2f2; border:2px solid #fca5a5; border-radius:8px;
-    padding:12px 16px; margin-bottom:12px; color:#991b1b; font-weight:600;
+.presence-badge {
+    display:inline-block; background:#fef9c3; color:#854d0e;
+    border-radius:20px; padding:2px 10px; font-size:.78rem; font-weight:600;
+    border:1px solid #fde68a; margin-left:6px;
 }
 .float-nav {
     position:fixed; left:16px; top:50%; transform:translateY(-50%);
@@ -200,16 +203,10 @@ div[data-testid="stNumberInput"] input {
     font-size:1.05rem !important; height:42px !important; text-align:center !important;
     background-color:#f0f9ff; border-color:#bae6fd;
 }
-div[data-testid="stNumberInput"] input:not([value="0"]):not([value=""]) {
-    background-color:#f0fdf4 !important; border-color:#86efac !important;
-}
-.media-item {
-    background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px;
-    padding:8px 12px; margin:4px 0; display:flex; align-items:center; gap:10px;
-}
 </style>
 """, unsafe_allow_html=True)
 
+# ── Session state ─────────────────────────────────────────────────────────────
 for k, v in [("page","dashboard"),("sel_line",None),("wo_action",None),
              ("edit_record_id",None),("form_shift","DS"),("confirm_delete",None),
              ("current_user","")]:
@@ -218,14 +215,21 @@ for k, v in [("page","dashboard"),("sel_line",None),("wo_action",None),
 now_str = datetime.now().strftime("%d %b %Y  |  %H:%M")
 st.markdown(f'<div class="wc-header"><h1>🧪 WILDCAT ENTERPRISE — Lab Dashboard</h1><span>{now_str}</span></div>', unsafe_allow_html=True)
 
-# User identification (simple)
-if not st.session_state.current_user:
-    with st.container():
-        st.markdown("### 👤 Who are you?")
-        u = st.text_input("Enter your name to continue", placeholder="e.g. Doygun")
-        if st.button("Continue", type="primary") and u:
-            st.session_state.current_user = u; st.rerun()
-    st.stop()
+# ── User name (sidebar, persistent) ──────────────────────────────────────────
+with st.sidebar:
+    st.markdown("### 👤 User")
+    user_input = st.text_input("Your name", value=st.session_state.current_user,
+                                placeholder="Enter your name", key="user_input")
+    if user_input != st.session_state.current_user:
+        st.session_state.current_user = user_input
+    if st.session_state.current_user:
+        st.success(f"Hello, **{st.session_state.current_user}**!")
+    else:
+        st.warning("Please enter your name")
+    st.divider()
+    st.markdown("**Navigation**")
+    if st.button("🏠 Dashboard", use_container_width=True):
+        st.session_state.page="dashboard"; st.rerun()
 
 db   = load_db()
 page = st.session_state.page
@@ -234,9 +238,6 @@ page = st.session_state.page
 # DASHBOARD
 # ══════════════════════════════════════════════════════════════════════════════
 if page == "dashboard":
-    st.markdown(f"👤 **{st.session_state.current_user}** &nbsp;|&nbsp; <a href='#' onclick=''>Switch user</a>", unsafe_allow_html=True)
-    if st.button("🔄 Switch User", key="switch_user"):
-        st.session_state.current_user = ""; st.rerun()
     st.markdown("### 📋 Active Work Orders")
     today = str(date.today())
     cols  = st.columns(2)
@@ -295,8 +296,10 @@ elif page == "records":
     if wo:
         st.markdown(f'<div style="background:#dbeafe;border-radius:8px;padding:8px 14px;margin:6px 0;font-size:.9rem;"><b>WO:</b> {wo["wo_number"]} | <b>ITEM:</b> {wo["item_code"]} | {wo.get("item_name","")}</div>', unsafe_allow_html=True)
     st.divider()
+
     all_recs  = load_records()
     line_recs = [r for r in all_recs if r.get("line") == line.replace("L-","")]
+    all_presence = get_all_presence()
 
     st.markdown("**🔍 Filter**")
     fc1,fc2,fc3,fc4,fc5 = st.columns([2,1.5,1.5,1.5,1.5])
@@ -341,22 +344,27 @@ elif page == "records":
                     edited    = " ✏️" if r.get("edited_at") else ""
                     form_code = r.get("form","?")
                     rid       = r.get("id","")
-                    lock      = check_lock(rid)
-                    lock_str  = f" 🔒 {lock['user']}" if lock and lock['user'] != st.session_state.current_user else ""
                     media_cnt = len(get_media_files(rid)) if rid else 0
                     media_str = f" 📎{media_cnt}" if media_cnt else ""
 
-                    c1,c2,c3,c4,c5,c6 = st.columns([0.8,0.8,1.2,1.5,3,2])
+                    # Presence
+                    presence  = all_presence.get(rid)
+                    pres_html = ""
+                    if presence and presence.get("user") != st.session_state.current_user:
+                        pres_html = f'<span class="presence-badge">👁️ {presence["user"]}</span>'
+
+                    c1,c2,c3,c4,c5,c6 = st.columns([0.8,0.8,1.2,1.5,3.5,2])
                     with c1: st.markdown(f"**{r.get('shift','?')}**")
                     with c2: st.markdown(f"🕐 {r.get('time','?')}")
                     with c3: st.markdown(f"WO: {r.get('wo','?')}")
                     with c4: st.markdown(f"📋 `{form_code}`")
-                    with c5: st.markdown(f"{r.get('operator','?')}{edited}{lock_str}{media_str}")
+                    with c5: st.markdown(f"{r.get('operator','?')}{edited}{media_str} {pres_html}", unsafe_allow_html=True)
                     with c6:
                         e1,e2 = st.columns(2)
                         with e1:
                             if rid and st.button("✏️ Edit", key=f"edit_{rid}", use_container_width=True):
-                                st.session_state.edit_record_id=rid; st.session_state.sel_line=line
+                                st.session_state.edit_record_id=rid
+                                st.session_state.sel_line=line
                                 st.session_state.page="form_wcfqc05"; st.rerun()
                         with e2:
                             if rid and st.button("🗑️ Del", key=f"del_{rid}", use_container_width=True):
@@ -437,9 +445,13 @@ elif page == "form_wcfqc05":
             if r.get("id") == edit_id: existing_rec=r; break
     is_edit = existing_rec is not None
 
+    # Set presence
+    if edit_id and st.session_state.current_user:
+        set_presence(edit_id, st.session_state.current_user)
+
     back_page = "records" if is_edit else "forms"
     if st.button(f"← Back to {'Records' if is_edit else 'Forms'}"):
-        if is_edit: release_lock(edit_id, st.session_state.current_user)
+        if edit_id: clear_presence(edit_id, st.session_state.current_user)
         st.session_state.page=back_page; st.rerun()
 
     if not wo and not existing_rec: st.error("No active WO!"); st.stop()
@@ -449,14 +461,6 @@ elif page == "form_wcfqc05":
             "colors":existing_rec.get("colors",[])}
 
     colors=wo.get("colors",[]); color_count=wo["color_count"]
-
-    # ── Concurrent edit lock ──────────────────────────────────────────────────
-    lock_warning = False
-    if is_edit and edit_id:
-        ok, lock_user, lock_time = acquire_lock(edit_id, st.session_state.current_user)
-        if not ok:
-            st.markdown(f'<div class="lock-warning">⚠️ WARNING: <b>{lock_user}</b> is currently editing this record (since {lock_time[:16].replace("T"," ")}). You can still edit but the last save will overwrite. Proceed with caution!</div>', unsafe_allow_html=True)
-            lock_warning = True
 
     def gv(path, default=None):
         if not existing_rec: return default
@@ -468,6 +472,10 @@ elif page == "form_wcfqc05":
 
     if is_edit:
         edited_str = f" | Last edited: {existing_rec['edited_at'][:16].replace('T',' ')}" if existing_rec.get('edited_at') else ""
+        # Show who else is viewing
+        presence = get_presence(edit_id)
+        if presence and presence.get("user") != st.session_state.current_user:
+            st.markdown(f'<div style="background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:8px 14px;margin-bottom:10px;">👁️ <b>{presence["user"]}</b> is also viewing this record</div>', unsafe_allow_html=True)
         st.markdown(f'<div class="edit-banner">✏️ EDITING — {existing_rec.get("date","")} | {existing_rec.get("shift","")} | {existing_rec.get("time","")} | {existing_rec.get("operator","")}{edited_str}</div>', unsafe_allow_html=True)
 
     st.markdown('<div style="text-align:center;border:2px solid #334155;border-radius:6px;overflow:hidden;margin-bottom:14px;"><div style="background:#1a3a5c;color:white;padding:10px;font-size:1.05rem;font-weight:bold;">🏭 WILDCAT ENTERPRISE TEXTILES INDUSTRIES</div><div style="background:#2563a8;color:white;padding:5px;font-size:.88rem;">WC-F-QC-05 Mono Yarn Full Inspection Form &nbsp;|&nbsp; Rev.00 &nbsp;|&nbsp; Date: 02-Jan-2025</div></div>', unsafe_allow_html=True)
@@ -498,7 +506,6 @@ elif page == "form_wcfqc05":
         with pcols[i]: positions.append(st.text_input(f"Pos {i+1}",value=dp,key=f"p_{i}"))
     st.divider()
 
-    # Floating nav
     nav_links="".join([f'<a href="#{p.strip()}">{p.strip()}</a>' for p in positions if p.strip()])
     st.markdown(f'<div class="float-nav"><div class="nav-title">POS</div>{nav_links}</div>', unsafe_allow_html=True)
 
@@ -520,9 +527,8 @@ elif page == "form_wcfqc05":
             st.markdown(f'<div class="section-lbl">DTEX <span class="unit-tag">{u}</span></div>', unsafe_allow_html=True)
             dtex_v={}; dc=st.columns(color_count)
             for ci,color in enumerate(colors):
-                with dc[ci]: dtex_v[color]=st.number_input(color,value=sv("dtex",color),format="%.1f",key=f"dtex_{pi}_{ci}",help=f"Unit: {u}")
+                with dc[ci]: dtex_v[color]=st.number_input(color,value=sv("dtex",color),format="%.1f",key=f"dtex_{pi}_{ci}")
             pd_["dtex"]=dtex_v
-
             st.markdown(f'<div class="section-lbl">TOTAL DTEX <span class="unit-tag">{UNITS["total_dtex"]}</span></div>', unsafe_allow_html=True)
             pd_["total_dtex"]=st.number_input("Total Dtex (manual)",value=saved_d.get("total_dtex",None),format="%.1f",key=f"tdtex_{pi}")
 
@@ -532,7 +538,8 @@ elif page == "form_wcfqc05":
                     u=UNITS[key]
                     st.markdown(f'<div class="section-lbl">{label} <span class="unit-tag">{u}</span></div>', unsafe_allow_html=True)
                     tmp={}
-                    for ci,color in enumerate(colors): tmp[color]=st.number_input(color,value=sv(key,color),format="%.1f" if key!="thickness" else "%.0f",key=f"{key}_{pi}_{ci}",help=f"Unit: {u}")
+                    for ci,color in enumerate(colors):
+                        tmp[color]=st.number_input(color,value=sv(key,color),format="%.0f" if key=="thickness" else "%.1f",key=f"{key}_{pi}_{ci}")
                     pd_[key]=tmp
             with right:
                 u=UNITS["yarn_wrap"]
@@ -542,11 +549,11 @@ elif page == "form_wcfqc05":
                     u=UNITS[key]
                     st.markdown(f'<div class="section-lbl">{label} <span class="unit-tag">{u}</span></div>', unsafe_allow_html=True)
                     tmp={}
-                    for ci,color in enumerate(colors): tmp[color]=st.number_input(color,value=sv(key,color),format="%.2f" if key=="width" else "%.1f",key=f"{key}_{pi}_{ci}",help=f"Unit: {u}")
+                    for ci,color in enumerate(colors):
+                        tmp[color]=st.number_input(color,value=sv(key,color),format="%.2f" if key=="width" else "%.1f",key=f"{key}_{pi}_{ci}")
                     pd_[key]=tmp
             all_data[plabel]=pd_
 
-    # ── SCI/SCE ───────────────────────────────────────────────────────────────
     st.divider()
     st.markdown("#### 🔬 SCI / SCE")
     saved_sci=gv("sci",{}); spool_no=st.text_input("Spool #",value=gv("spool_no",""),placeholder="e.g. 01143")
@@ -556,23 +563,20 @@ elif page == "form_wcfqc05":
             st.markdown(f"**{color}**")
             sci_data[color]=st.text_input("SCI/SCE",value=saved_sci.get(color,""),placeholder="0.51/0.31",key=f"sci_{ci}")
 
-    # ── Tolerance / Verified ──────────────────────────────────────────────────
     st.divider()
-    st.markdown('<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:12px 16px;margin-bottom:10px;"><b>TOLERANCE VALUE CHECK</b><br><span style="font-size:.82rem;color:#64748b;">All the tests are conducted in accordance with standard procedure. The results have been verified for accuracy, compliance, and are with the specified tolerance limits.</span></div>', unsafe_allow_html=True)
+    st.markdown('<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:12px 16px;margin-bottom:10px;"><b>TOLERANCE VALUE CHECK</b><br><span style="font-size:.82rem;color:#64748b;">All tests conducted per standard procedure. Results verified for accuracy and compliance.</span></div>', unsafe_allow_html=True)
     verified_v=st.text_input("✅ Verified by",value=gv("verified_by",""),placeholder="Name Surname")
 
-    # ── Comments ──────────────────────────────────────────────────────────────
     st.divider()
     st.markdown("#### 💬 Comments")
-    comments_v=st.text_area("Add notes, observations, issues...",value=gv("comments",""),height=100,placeholder="e.g. Color inconsistency observed on position 6, notified supervisor...")
+    comments_v=st.text_area("Notes, observations, issues...",value=gv("comments",""),height=100,
+                             placeholder="e.g. Color inconsistency observed on position 6...")
 
-    # ── Photo upload (inline with form) ──────────────────────────────────────
-    st.markdown("#### 📷 Photos (optional)")
-    st.caption("Upload photos related to this inspection (defects, samples, etc.)")
+    st.markdown("#### 📷 Photos")
+    st.caption("Upload photos related to this inspection")
     photo_uploads=st.file_uploader("Upload photos",type=["jpg","jpeg","png","webp"],
                                     accept_multiple_files=True,key="photo_upload")
 
-    # ── Save ──────────────────────────────────────────────────────────────────
     st.divider()
     if st.button("💾 UPDATE RECORD" if is_edit else "💾 SAVE RECORD",use_container_width=True,type="primary"):
         if not opr_v: st.error("Please enter Operator name!"); st.stop()
@@ -586,62 +590,72 @@ elif page == "form_wcfqc05":
                 "comments":comments_v}
         if is_edit:
             update_record(edit_id,record)
-            # Save photos
             if photo_uploads:
-                for uf in photo_uploads:
-                    save_media_file(edit_id,"photo",uf,wo["wo_number"])
-            release_lock(edit_id, st.session_state.current_user)
+                for uf in photo_uploads: save_media_file(edit_id,"photo",uf,wo["wo_number"])
+            clear_presence(edit_id, st.session_state.current_user)
             st.success("✅ Record updated!")
         else:
             new_id=add_record(record)
             if photo_uploads:
-                for uf in photo_uploads:
-                    save_media_file(new_id,"photo",uf,wo["wo_number"])
+                for uf in photo_uploads: save_media_file(new_id,"photo",uf,wo["wo_number"])
             st.success("✅ Record saved!"); st.balloons()
 
-    # ── Media section (existing files) ───────────────────────────────────────
+    # ── Media section ─────────────────────────────────────────────────────────
     record_id = edit_id if is_edit else None
     if record_id:
         st.divider()
         st.markdown("#### 📁 Media & Documents")
-        st.caption("Upload protocols, spectro photos, test documents")
+        st.caption("Select attachment type, then upload. File saved as: **TYPE_WORKORDER_datetime.ext**")
 
-        media_types = ["protocol","spectro","txt_photo","other"]
-        mt_sel = st.selectbox("File type", media_types, key="mt_sel")
-        doc_upload = st.file_uploader("Upload file",
-                                       type=["jpg","jpeg","png","pdf","txt","xlsx","docx"],
-                                       key="doc_upload")
-        if doc_upload and st.button("📎 Attach File", use_container_width=True):
-            fname = save_media_file(record_id, mt_sel, doc_upload, wo["wo_number"])
-            st.success(f"✅ Saved as: {fname}"); st.rerun()
+        ATTACH_TYPES = {
+            "📷 Photo":        "photo",
+            "🔬 Spectro":      "spectro",
+            "📋 Protocol":     "protocol",
+            "📄 TXT Photo":    "txt_photo",
+            "📊 Lab Report":   "lab_report",
+            "📁 Other":        "other",
+        }
+        a1, a2 = st.columns([2, 4])
+        with a1:
+            mt_label = st.selectbox("Attachment Type", list(ATTACH_TYPES.keys()), key="mt_sel")
+            mt_sel   = ATTACH_TYPES[mt_label]
+        with a2:
+            doc_upload = st.file_uploader("Select file",
+                                           type=["jpg","jpeg","png","pdf","txt","xlsx","docx","webp"],
+                                           key="doc_upload")
+        if doc_upload:
+            preview_name = f"{mt_sel}_{wo['wo_number']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{Path(doc_upload.name).suffix}"
+            st.caption(f"Will be saved as: `{preview_name}`")
+            if st.button("📎 Attach File", use_container_width=True, type="primary"):
+                fname=save_media_file(record_id,mt_sel,doc_upload,wo["wo_number"])
+                st.success(f"✅ Saved as: {fname}"); st.rerun()
 
-        existing_files = get_media_files(record_id)
+        existing_files=get_media_files(record_id)
         if existing_files:
             st.markdown(f"**{len(existing_files)} file(s) attached:**")
             for fname in existing_files:
-                fpath = get_media_path(record_id, fname)
-                fsize = os.path.getsize(fpath)
-                with open(fpath,"rb") as f: fdata = f.read()
-                mime = mimetypes.guess_type(fpath)[0] or "application/octet-stream"
-                fc1,fc2,fc3 = st.columns([5,1.5,1.5])
-                with fc1: st.markdown(f"📄 `{fname}` &nbsp; <span style='color:#94a3b8;font-size:.8rem;'>{fsize//1024} KB</span>", unsafe_allow_html=True)
-                with fc2: st.download_button("⬇ Download", data=fdata, file_name=fname, mime=mime, key=f"dl_{fname}", use_container_width=True)
+                fpath=get_media_path(record_id,fname)
+                fsize=os.path.getsize(fpath)
+                with open(fpath,"rb") as f: fdata=f.read()
+                mime=mimetypes.guess_type(fpath)[0] or "application/octet-stream"
+                fc1,fc2,fc3=st.columns([5,1.5,1.5])
+                with fc1: st.markdown(f"📄 `{fname}` &nbsp;<span style='color:#94a3b8;font-size:.8rem;'>{fsize//1024} KB</span>",unsafe_allow_html=True)
+                with fc2: st.download_button("⬇",data=fdata,file_name=fname,mime=mime,key=f"dl_{fname}",use_container_width=True)
                 with fc3:
-                    if st.button("🗑", key=f"delmedia_{fname}", use_container_width=True):
+                    if st.button("🗑",key=f"delmedia_{fname}",use_container_width=True):
                         os.remove(fpath); st.rerun()
 
     # ── PDF Export ────────────────────────────────────────────────────────────
     if is_edit and existing_rec:
         st.divider()
-        st.markdown("#### 📄 Export")
-        if st.button("📄 Download as PDF", use_container_width=True):
+        st.markdown("#### 📄 Export PDF")
+        if st.button("📄 Generate PDF",use_container_width=True):
             try:
-                import sys; sys.path.insert(0, "/home/claude/lab")
+                import sys; sys.path.insert(0,"/root/lab")
                 from pdf_export import generate_pdf
-                pdf_bytes = generate_pdf(existing_rec)
-                fname = f"{existing_rec.get('wo','WO')}_{existing_rec.get('date','date')}_{existing_rec.get('shift','')}_QC05.pdf"
-                st.download_button("⬇ Click to download PDF", data=pdf_bytes,
-                                   file_name=fname, mime="application/pdf",
-                                   key="pdf_dl", use_container_width=True)
+                pdf_bytes=generate_pdf(existing_rec)
+                fname=f"{existing_rec.get('wo','WO')}_{existing_rec.get('date','date')}_{existing_rec.get('shift','')}_QC05.pdf"
+                st.download_button("⬇ Download PDF",data=pdf_bytes,file_name=fname,
+                                   mime="application/pdf",key="pdf_dl",use_container_width=True)
             except Exception as e:
                 st.error(f"PDF error: {e}")
