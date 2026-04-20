@@ -215,21 +215,18 @@ for k, v in [("page","dashboard"),("sel_line",None),("wo_action",None),
 now_str = datetime.now().strftime("%d %b %Y  |  %H:%M")
 st.markdown(f'<div class="wc-header"><h1>🧪 WILDCAT ENTERPRISE — Lab Dashboard</h1><span>{now_str}</span></div>', unsafe_allow_html=True)
 
-# ── User name (sidebar, persistent) ──────────────────────────────────────────
-with st.sidebar:
-    st.markdown("### 👤 User")
-    user_input = st.text_input("Your name", value=st.session_state.current_user,
+# ── Top bar ───────────────────────────────────────────────────────────────────
+tb1, tb2, tb3 = st.columns([3, 1.2, 1.5])
+with tb1:
+    user_input = st.text_input("👤 Name", value=st.session_state.current_user,
                                 placeholder="Enter your name", key="user_input")
     if user_input != st.session_state.current_user:
         st.session_state.current_user = user_input
-    if st.session_state.current_user:
-        st.success(f"Hello, **{st.session_state.current_user}**!")
-    else:
-        st.warning("Please enter your name")
-    st.divider()
-    st.markdown("**Navigation**")
+with tb2:
     if st.button("🏠 Dashboard", use_container_width=True):
         st.session_state.page="dashboard"; st.rerun()
+with tb3:
+    st.markdown(f"<div style='padding-top:8px;color:#64748b;font-size:.85rem;'>Logged in as: <b>{st.session_state.current_user or '—'}</b></div>", unsafe_allow_html=True)
 
 db   = load_db()
 page = st.session_state.page
@@ -640,10 +637,18 @@ elif page == "form_wcfqc05":
                 mime=mimetypes.guess_type(fpath)[0] or "application/octet-stream"
                 fc1,fc2,fc3=st.columns([5,1.5,1.5])
                 with fc1: st.markdown(f"📄 `{fname}` &nbsp;<span style='color:#94a3b8;font-size:.8rem;'>{fsize//1024} KB</span>",unsafe_allow_html=True)
-                with fc2: st.download_button("⬇",data=fdata,file_name=fname,mime=mime,key=f"dl_{fname}",use_container_width=True)
+                with fc2: st.download_button("⬇️ Download",data=fdata,file_name=fname,mime=mime,key=f"dl_{fname}",use_container_width=True)
                 with fc3:
-                    if st.button("🗑",key=f"delmedia_{fname}",use_container_width=True):
-                        os.remove(fpath); st.rerun()
+                    if st.button("🗑️ Delete",key=f"delmedia_{fname}",use_container_width=True):
+                        if st.session_state.get(f"confirm_media_{fname}"):
+                            os.remove(fpath)
+                            del st.session_state[f"confirm_media_{fname}"]
+                            st.rerun()
+                        else:
+                            st.session_state[f"confirm_media_{fname}"] = True
+                            st.rerun()
+                if st.session_state.get(f"confirm_media_{fname}"):
+                    st.warning(f"Delete `{fname}`? Click Delete again to confirm.")
 
     # ── PDF Export ────────────────────────────────────────────────────────────
     if is_edit and existing_rec:

@@ -70,7 +70,7 @@ def generate_pdf(record):
         P("ITEM",7,True), P(record.get("item",""),8),
         P("OPERATOR",7,True), P(record.get("operator",""),8),
     ]]
-    info_tbl = Table(info_data, colWidths=[16,22,14,14,14,26,13,16,16,26,14,22,18,37]*mm)
+    info_tbl = Table(info_data, colWidths=[x*mm for x in [16,22,14,14,14,26,13,16,16,26,14,22,18,37]])
     info_tbl.setStyle(TableStyle([
         ('BACKGROUND',(0,0),(0,0),LGRAY),('BACKGROUND',(2,0),(2,0),LGRAY),
         ('BACKGROUND',(4,0),(4,0),LGRAY),('BACKGROUND',(6,0),(6,0),LGRAY),
