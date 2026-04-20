@@ -6,6 +6,11 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 import io
 
+def initials(name):
+    """FIELD GREEN -> FG, OLIVE GREEN -> OG, etc."""
+    words = name.strip().split()
+    return "".join(w[0].upper() for w in words if w)
+
 BLUE  = colors.HexColor("#1a3a5c")
 BLUE2 = colors.HexColor("#2563a8")
 LGRAY = colors.HexColor("#f1f5f9")
@@ -41,24 +46,25 @@ def fmt(val):
         return f"{f:.1f}" if f != int(f) else str(int(f))
     except: return str(val) if val else "-"
 
-def make_pos_table(pos, pd, colors_list):
+def make_pos_table(pos, pd, colors_list, block_w_mm=93):
     nc = len(colors_list)
     # Column widths: label=38mm, unit=9mm, each color=min(18,170/(nc) mm
     avail = 170
-    lw = 38; uw = 9
-    cvw = min(20, int((avail - lw - uw) / max(nc,1)))
+    # label=28, unit=8, color cols as narrow as possible
+    lw = 28; uw = 7
+    cvw = 10  # FG/OG/LG initials are short, 10mm is enough
     col_w = [lw*mm, uw*mm] + [cvw*mm]*nc
 
     # Header row
     hdr = [P(f"Pos: {pos}", 8, True, WHITE, TA_CENTER),
            P("Unit", 7, False, WHITE, TA_CENTER)]
     for c in colors_list:
-        hdr.append(P(c, 7, True, WHITE, TA_CENTER))
+        hdr.append(P(initials(c), 7, True, WHITE, TA_CENTER))
 
     rows = [hdr]
     for key, label in TESTS:
         unit = UNITS.get(key,"")
-        row  = [P(label, 7, True), P(unit, 7, False, colors.HexColor("#0369a1"))]
+        row  = [P(label, 6, True), P(unit, 6, False, colors.HexColor("#0369a1"))]
         if key in ("total_dtex","yarn_wrap"):
             val = pd.get(key)
             row.append(P(fmt(val), 8))
@@ -75,8 +81,8 @@ def make_pos_table(pos, pd, colors_list):
         ('TEXTCOLOR',(0,0),(-1,0),WHITE),
         ('GRID',(0,0),(-1,-1),0.4,LGRAY2),
         ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
-        ('TOPPADDING',(0,0),(-1,-1),2),
-        ('BOTTOMPADDING',(0,0),(-1,-1),2),
+        ('TOPPADDING',(0,0),(-1,-1),1),
+        ('BOTTOMPADDING',(0,0),(-1,-1),1),
         ('FONTSIZE',(0,0),(-1,-1),7),
         ('ROWBACKGROUNDS',(0,1),(-1,-1),[WHITE,LGRAY]),
     ]
@@ -138,11 +144,12 @@ def generate_pdf(record):
              for i in range(0,len(positions),2)]
 
     for pos_l, pos_r in pairs:
-        tbl_l = make_pos_table(pos_l, test_data.get(pos_l,{}), colors_list)
+        block_w = 93  # mm per block when 2 side by side (190 - 4 sep) / 2
+        tbl_l = make_pos_table(pos_l, test_data.get(pos_l,{}), colors_list, block_w)
         if pos_r:
-            tbl_r = make_pos_table(pos_r, test_data.get(pos_r,{}), colors_list)
+            tbl_r = make_pos_table(pos_r, test_data.get(pos_r,{}), colors_list, block_w)
             combined = Table([[tbl_l, Spacer(4*mm,1), tbl_r]],
-                              colWidths=[91*mm, 4*mm, 91*mm],
+                              colWidths=[93*mm, 4*mm, 93*mm],
                               splitByRow=0)
             combined.setStyle(TableStyle([
                 ('VALIGN',(0,0),(-1,-1),'TOP'),
@@ -153,6 +160,7 @@ def generate_pdf(record):
             ]))
             story.append(KeepTogether(combined))
         else:
+            tbl_l = make_pos_table(pos_l, test_data.get(pos_l,{}), colors_list, 190)
             story.append(KeepTogether(tbl_l))
         story.append(Spacer(1,3*mm))
 
