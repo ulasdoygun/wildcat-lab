@@ -1,4 +1,4 @@
-from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
@@ -37,7 +37,7 @@ def fmt(val):
 
 def generate_pdf(record):
     buffer  = io.BytesIO()
-    doc     = SimpleDocTemplate(buffer, pagesize=landscape(A4),
+    doc     = SimpleDocTemplate(buffer, pagesize=A4,
                                 rightMargin=10*mm, leftMargin=10*mm,
                                 topMargin=10*mm, bottomMargin=10*mm)
     story   = []
@@ -48,13 +48,13 @@ def generate_pdf(record):
 
     # ── Header ────────────────────────────────────────────────────────────────
     hdr = Table([[P("WILDCAT ENTERPRISE TEXTILES INDUSTRIES", 12, True, WHITE, TA_CENTER)]],
-                colWidths=[277*mm])
+                colWidths=[190*mm])
     hdr.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),BLUE),
                               ('TOPPADDING',(0,0),(-1,-1),7),('BOTTOMPADDING',(0,0),(-1,-1),7)]))
     story.append(hdr)
 
     sub = Table([[P("WC-F-QC-05  Mono Yarn Full Inspection Form  |  Rev.00  |  Date: 02-Jan-2025",
-                    8, False, WHITE, TA_CENTER)]], colWidths=[277*mm])
+                    8, False, WHITE, TA_CENTER)]], colWidths=[190*mm])
     sub.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),BLUE2),
                               ('TOPPADDING',(0,0),(-1,-1),4),('BOTTOMPADDING',(0,0),(-1,-1),4)]))
     story.append(sub)
@@ -70,7 +70,7 @@ def generate_pdf(record):
         P("ITEM",7,True), P(record.get("item",""),8),
         P("OPERATOR",7,True), P(record.get("operator",""),8),
     ]]
-    info_tbl = Table(info_data, colWidths=[x*mm for x in [16,22,14,14,14,26,13,16,16,26,14,22,18,37]])
+    info_tbl = Table(info_data, colWidths=[x*mm for x in [12,18,12,12,12,22,10,14,14,22,10,18,16,28]])
     info_tbl.setStyle(TableStyle([
         ('BACKGROUND',(0,0),(0,0),LGRAY),('BACKGROUND',(2,0),(2,0),LGRAY),
         ('BACKGROUND',(4,0),(4,0),LGRAY),('BACKGROUND',(6,0),(6,0),LGRAY),
@@ -98,13 +98,13 @@ def generate_pdf(record):
 
     # Column widths for one position block
     # test_label | unit | color1 | color2 | ... (max 4 colors)
-    lw  = 32*mm   # label
-    uw  = 12*mm   # unit
-    cvw = 14*mm   # color value
-    sep = 6*mm    # separator between two pos blocks
+    lw  = 36*mm   # label
+    uw  = 10*mm   # unit
+    cvw = 15*mm   # color value
+    sep = 4*mm    # separator between two pos blocks
 
     one_block_w = lw + uw + nc*cvw
-    total_w     = 277*mm
+    total_w     = 190*mm
     # We can fit 2 positions side by side
     pairs = [(positions[i], positions[i+1] if i+1 < len(positions) else None)
              for i in range(0, len(positions), 2)]
@@ -202,7 +202,7 @@ def generate_pdf(record):
         sci_row  = [P(f"SCI/SCE  (Spool: {spool})", 7, True)] 
         sci_vals = [P(f"{c}: {sci.get(c,'-')}", 8) for c in colors_list]
         sci_data_tbl = Table([sci_row + sci_vals],
-                              colWidths=[50*mm] + [40*mm]*nc)
+                              colWidths=[50*mm] + [35*mm]*nc)
         sci_data_tbl.setStyle(TableStyle([
             ('BACKGROUND',(0,0),(0,0),LGRAY),
             ('GRID',(0,0),(-1,-1),0.4,LGRAY2),
@@ -215,7 +215,7 @@ def generate_pdf(record):
     comments = record.get("comments","")
     if comments:
         cmt = Table([[P("Comments:", 7, True), P(comments, 8)]],
-                     colWidths=[25*mm, 252*mm])
+                     colWidths=[25*mm, 165*mm])
         cmt.setStyle(TableStyle([
             ('BACKGROUND',(0,0),(0,0),LGRAY),
             ('GRID',(0,0),(-1,-1),0.4,LGRAY2),
@@ -230,7 +230,7 @@ def generate_pdf(record):
         P("TOLERANCE VALUE CHECK", 7, True),
         P("All tests conducted per standard procedure. Results verified for accuracy and compliance.", 7),
         P(f"Verified by: {record.get('verified_by','')}", 8, True),
-    ]], colWidths=[45*mm, 190*mm, 42*mm])
+    ]], colWidths=[40*mm, 110*mm, 40*mm])
     tol.setStyle(TableStyle([
         ('BACKGROUND',(0,0),(0,0),LGRAY),('BACKGROUND',(2,0),(2,0),LGRAY),
         ('GRID',(0,0),(-1,-1),0.4,LGRAY2),

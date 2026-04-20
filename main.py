@@ -199,6 +199,16 @@ st.markdown("""
 }
 .float-nav a:hover { background:#1a3a5c; }
 .float-nav .nav-title { font-size:.68rem; color:#94a3b8; text-align:center; font-weight:600; margin-bottom:2px; }
+.float-save {
+    position:fixed; right:20px; bottom:30px; z-index:9999;
+}
+.float-save button {
+    background:#15803d !important; color:white !important;
+    border-radius:50px !important; padding:12px 24px !important;
+    font-size:1rem !important; font-weight:700 !important;
+    box-shadow:0 4px 16px rgba(0,0,0,.2) !important;
+    border:none !important; cursor:pointer !important;
+}
 div[data-testid="stNumberInput"] input {
     font-size:1.05rem !important; height:42px !important; text-align:center !important;
     background-color:#f0f9ff; border-color:#bae6fd;
@@ -216,17 +226,20 @@ now_str = datetime.now().strftime("%d %b %Y  |  %H:%M")
 st.markdown(f'<div class="wc-header"><h1>🧪 WILDCAT ENTERPRISE — Lab Dashboard</h1><span>{now_str}</span></div>', unsafe_allow_html=True)
 
 # ── Top bar ───────────────────────────────────────────────────────────────────
-tb1, tb2, tb3 = st.columns([3, 1.2, 1.5])
+tb1, tb2 = st.columns([4, 1])
 with tb1:
-    user_input = st.text_input("👤 Name", value=st.session_state.current_user,
-                                placeholder="Enter your name", key="user_input")
-    if user_input != st.session_state.current_user:
-        st.session_state.current_user = user_input
+    tc1, tc2 = st.columns([2, 2])
+    with tc1:
+        user_input = st.text_input("👤", value=st.session_state.current_user,
+                                    placeholder="Your name", key="user_input",
+                                    label_visibility="collapsed")
+        if user_input != st.session_state.current_user:
+            st.session_state.current_user = user_input
+    with tc2:
+        st.markdown(f"<div style='padding-top:8px;color:#475569;font-size:.88rem;'>👤 <b>{st.session_state.current_user or 'Enter name →'}</b></div>", unsafe_allow_html=True)
 with tb2:
     if st.button("🏠 Dashboard", use_container_width=True):
         st.session_state.page="dashboard"; st.rerun()
-with tb3:
-    st.markdown(f"<div style='padding-top:8px;color:#64748b;font-size:.85rem;'>Logged in as: <b>{st.session_state.current_user or '—'}</b></div>", unsafe_allow_html=True)
 
 db   = load_db()
 page = st.session_state.page
@@ -475,6 +488,10 @@ elif page == "form_wcfqc05":
             st.markdown(f'<div style="background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:8px 14px;margin-bottom:10px;">👁️ <b>{presence["user"]}</b> is also viewing this record</div>', unsafe_allow_html=True)
         st.markdown(f'<div class="edit-banner">✏️ EDITING — {existing_rec.get("date","")} | {existing_rec.get("shift","")} | {existing_rec.get("time","")} | {existing_rec.get("operator","")}{edited_str}</div>', unsafe_allow_html=True)
 
+    # ── Quick save at top (edit mode) ────────────────────────────────────────
+    if is_edit:
+        st.markdown('<div style="background:#f0fdf4;border:2px solid #86efac;border-radius:8px;padding:8px 14px;margin-bottom:10px;color:#15803d;font-size:.85rem;">⬇️ Scroll down to fill in the form, then click <b>UPDATE RECORD</b> at the bottom — or use the button below after filling.</div>', unsafe_allow_html=True)
+
     st.markdown('<div style="text-align:center;border:2px solid #334155;border-radius:6px;overflow:hidden;margin-bottom:14px;"><div style="background:#1a3a5c;color:white;padding:10px;font-size:1.05rem;font-weight:bold;">🏭 WILDCAT ENTERPRISE TEXTILES INDUSTRIES</div><div style="background:#2563a8;color:white;padding:5px;font-size:.88rem;">WC-F-QC-05 Mono Yarn Full Inspection Form &nbsp;|&nbsp; Rev.00 &nbsp;|&nbsp; Date: 02-Jan-2025</div></div>', unsafe_allow_html=True)
 
     h1,h2,h3,h4=st.columns([1,1,2,1])
@@ -492,6 +509,9 @@ elif page == "form_wcfqc05":
     with h6: st.text_input("ITEM",value=wo["item_code"],disabled=True)
     with h7: st.text_input("ITEM NAME",value=wo.get("item_name",""),disabled=True)
     opr_v=st.text_input("OPERATOR",value=gv("operator",st.session_state.current_user),placeholder="Name Surname")
+
+    if is_edit:
+        st.markdown('<div style="background:#fef9c3;border-radius:8px;padding:6px 12px;margin:6px 0;font-size:.82rem;color:#854d0e;">💡 Fill in all fields below, then click <b>💾 UPDATE RECORD</b> at the bottom of the page.</div>', unsafe_allow_html=True)
     st.divider()
 
     st.markdown("#### 📍 Positions")
@@ -593,12 +613,15 @@ elif page == "form_wcfqc05":
             st.success("✅ Record updated!")
         else:
             new_id=add_record(record)
+            st.session_state.last_saved_id = new_id
+            st.session_state.edit_record_id = new_id
             if photo_uploads:
                 for uf in photo_uploads: save_media_file(new_id,"photo",uf,wo["wo_number"])
-            st.success("✅ Record saved!"); st.balloons()
+            st.success("✅ Record saved! You can now add attachments below."); st.balloons()
 
     # ── Media section ─────────────────────────────────────────────────────────
-    record_id = edit_id if is_edit else None
+    # For new records, save first then attach; for edit, available immediately
+    record_id = edit_id if is_edit else st.session_state.get("last_saved_id")
     if record_id:
         st.divider()
         st.markdown("#### 📁 Media & Documents")
