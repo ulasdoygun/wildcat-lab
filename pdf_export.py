@@ -98,10 +98,13 @@ def generate_pdf(record):
 
     # Column widths for one position block
     # test_label | unit | color1 | color2 | ... (max 4 colors)
-    lw  = 36*mm   # label
-    uw  = 10*mm   # unit
-    cvw = 15*mm   # color value
-    sep = 4*mm    # separator between two pos blocks
+    # Portrait A4 usable = 190mm
+    # 2 blocks side by side: each block = lw + uw + nc*cvw, plus sep
+    # Max nc=4: each block = 28+8+4*12=72mm, 2 blocks+sep = 72+4+72 = 148mm < 190 OK
+    lw  = 28*mm
+    uw  = 8*mm
+    cvw = 12*mm
+    sep = 4*mm
 
     one_block_w = lw + uw + nc*cvw
     total_w     = 190*mm
